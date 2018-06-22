@@ -21,6 +21,14 @@
 #include "../../nuklear.h"
 #include "nuklear_xlib.h"
 
+#ifdef HAS_XRANDR
+#include <X11/extensions/Xrandr.h>
+#define HiDPI(_v) ((int)((_v) * xw.dpi96))
+#else
+#warnign No Xrandr library present
+#define HiDPI(_v) ((int)((_v) * xw.dpi96))
+#endif
+
   #include "../style.c"
 
 #define DTIME           20
@@ -75,9 +83,22 @@ sleep_for(long t)
     while(-1 == nanosleep(&req, &req));
 }
 
-#include <X11/extensions/Xrandr.h>
+int draw_terminal_widget(struct nk_context *ctx)
+{
+	struct nk_command_buffer *canvas;
+	struct nk_input *input = &ctx->input;
+	canvas = nk_window_get_canvas(ctx);
 
-#define HiDPI(_v) ((int)((_v) * xw.dpi96))
+	struct nk_rect space;
+	enum nk_widget_layout_states state;
+	state = nk_widget(&space, ctx);
+	if (!state) return;
+
+//	if (state != NK_WIDGET_ROM)
+//		update_your_widget_by_user_input(...);
+	nk_fill_rect(canvas, space, 0, nk_rgb(0,0,0));
+	return 0;
+}
 
 int
 main(void)
@@ -119,6 +140,8 @@ main(void)
 			printf("\n");
 			if (i == current_size) {
 				float dpi = sizes[i].width / (sizes[i].mwidth / 25.4);
+				if (dpi < 96.0f)
+					dpi = 96.0f;
 				xw.dpi = dpi;
 				xw.dpi96 = dpi / 96.0f;
 				printf("DPI scaling factor from to %d to 96: %.3f\n", xw.dpi, xw.dpi96);
@@ -188,9 +211,7 @@ main(void)
             if (nk_option_label(ctx, "hard", op == HARD)) op = HARD;
             nk_layout_row_dynamic(ctx, HiDPI(300), 1);
 
-			if (nk_group_scrolled_offset_begin(ctx, &x_offset, &y_offset,
-					"contents", NK_WINDOW_BORDER)) {
-				nk_group_scrolled_end(ctx);
+			if (draw_terminal_widget(ctx)) {
 			}
         }
         nk_end(ctx);
