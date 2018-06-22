@@ -1,4 +1,5 @@
 /* nuklear - v1.32.0 - public domain */
+// vim: ts=4
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,8 @@
 #include "../../nuklear.h"
 #include "nuklear_xlib.h"
 
+  #include "../style.c"
+
 #define DTIME           20
 #define WINDOW_WIDTH    800
 #define WINDOW_HEIGHT   600
@@ -35,6 +38,8 @@ struct XWindow {
     Window win;
     int screen;
     XFont *font;
+    int dpi; // current DPI
+    float dpi96; // convert sizes to current DPI from 96
     unsigned int width;
     unsigned int height;
     Atom wm_delete_window;
@@ -70,6 +75,9 @@ sleep_for(long t)
     while(-1 == nanosleep(&req, &req));
 }
 
+#include <X11/extensions/Xrandr.h>
+
+#define HiDPI(_v) ((int)((_v) * xw.dpi96))
 
 int
 main(void)
@@ -88,14 +96,43 @@ main(void)
     xw.screen = XDefaultScreen(xw.dpy);
     xw.vis = XDefaultVisual(xw.dpy, xw.screen);
     xw.cmap = XCreateColormap(xw.dpy,xw.root,xw.vis,AllocNone);
-
+	{
+		SizeID        current_size;
+		XRRScreenSize *sizes;
+		int nsize;
+		Rotation current_rotation;
+		XRRScreenConfiguration *sc = XRRGetScreenInfo (xw.dpy, xw.root);
+		current_size = XRRConfigCurrentConfiguration (sc, &current_rotation);
+		sizes = XRRConfigSizes(sc, &nsize);
+		printf("XRRConfigSizes %d\n", nsize);
+		for (int i = 0; i < nsize; i++) {
+			printf ("%c%-2d %5d x %-5d  (%4dmm x%4dmm ) ",
+				i == current_size ? '*' : ' ',
+				i, sizes[i].width, sizes[i].height,
+				sizes[i].mwidth, sizes[i].mheight);
+		// ...
+			printf("screen %2.3fin x %2.3fin ",
+				sizes[i].mwidth / 25.4, sizes[i].mwidth / 25.4);
+			printf("dpi %3d x %3d ",
+				(int)(sizes[i].width / (sizes[i].mwidth / 25.4)),
+				(int)(sizes[i].height / (sizes[i].mwidth / 25.4)));
+			printf("\n");
+			if (i == current_size) {
+				float dpi = sizes[i].width / (sizes[i].mwidth / 25.4);
+				xw.dpi = dpi;
+				xw.dpi96 = dpi / 96.0f;
+				printf("DPI scaling factor from to %d to 96: %.3f\n", xw.dpi, xw.dpi96);
+			}
+		}
+	}
     xw.swa.colormap = xw.cmap;
     xw.swa.event_mask =
         ExposureMask | KeyPressMask | KeyReleaseMask |
         ButtonPress | ButtonReleaseMask| ButtonMotionMask |
         Button1MotionMask | Button3MotionMask | Button4MotionMask | Button5MotionMask|
         PointerMotionMask | KeymapStateMask;
-    xw.win = XCreateWindow(xw.dpy, xw.root, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, 0,
+    xw.win = XCreateWindow(xw.dpy, xw.root, 0, 0,
+		HiDPI(WINDOW_WIDTH), HiDPI(WINDOW_HEIGHT), 0,
         XDefaultDepth(xw.dpy, xw.screen), InputOutput,
         xw.vis, CWEventMask | CWColormap, &xw.swa);
 
@@ -108,15 +145,19 @@ main(void)
     xw.height = (unsigned int)xw.attr.height;
 
     /* GUI */
-    xw.font = nk_xfont_create(xw.dpy, "Dejavu Sans");
+    char fontname[40];
+    sprintf(fontname, "Dejavu Sans-%d", HiDPI(8));
+    printf("Font name %s for window size %dx%d\n", fontname, xw.width, xw.height);
+    xw.font = nk_xfont_create(xw.dpy, fontname);
     ctx = nk_xlib_init(xw.font, xw.dpy, xw.screen, xw.win,
 #ifdef NK_XLIB_USE_XFT
                     xw.vis, xw.cmap,
 #endif
                     xw.width, xw.height);
 
-    while (running)
-    {
+    set_style(ctx, THEME_BLUE);
+    nk_uint x_offset = 0, y_offset = 0;
+    while (running) {
         /* Input */
         XEvent evt;
         started = timestamp();
@@ -129,8 +170,32 @@ main(void)
         }
         nk_input_end(ctx);
 
+		static struct nk_colorf mycolor = { 1.0f, 0.0f, 0.0f, 1.0f };
+
         /* GUI */
-        if (nk_begin(ctx, "Demo", nk_rect(50, 50, 200, 200),
+        if (nk_begin(ctx, "Shell", nk_rect(0, 0, HiDPI(800), HiDPI(600)),
+				NK_WINDOW_BACKGROUND)) {
+
+            enum {EASY, HARD};
+            static int op = EASY;
+            static int property = 20;
+
+            nk_layout_row_static(ctx, HiDPI(30), HiDPI(80), 1);
+            if (nk_button_label(ctx, "button"))
+                fprintf(stdout, "button pressed\n");
+            nk_layout_row_dynamic(ctx, 0, 2);
+            if (nk_option_label(ctx, "easy", op == EASY)) op = EASY;
+            if (nk_option_label(ctx, "hard", op == HARD)) op = HARD;
+            nk_layout_row_dynamic(ctx, HiDPI(300), 1);
+
+			if (nk_group_scrolled_offset_begin(ctx, &x_offset, &y_offset,
+					"contents", NK_WINDOW_BORDER)) {
+				nk_group_scrolled_end(ctx);
+			}
+        }
+        nk_end(ctx);
+
+        if (nk_begin(ctx, "Demo", nk_rect(HiDPI(50), HiDPI(50), HiDPI(200), HiDPI(200)),
             NK_WINDOW_BORDER|NK_WINDOW_MOVABLE|NK_WINDOW_SCALABLE|
             NK_WINDOW_CLOSABLE|NK_WINDOW_MINIMIZABLE|NK_WINDOW_TITLE))
         {
@@ -138,21 +203,25 @@ main(void)
             static int op = EASY;
             static int property = 20;
 
-            nk_layout_row_static(ctx, 30, 80, 1);
+            nk_layout_row_static(ctx, HiDPI(30), HiDPI(80), 1);
             if (nk_button_label(ctx, "button"))
                 fprintf(stdout, "button pressed\n");
-            nk_layout_row_dynamic(ctx, 30, 2);
+            nk_layout_row_dynamic(ctx, HiDPI(30), 2);
             if (nk_option_label(ctx, "easy", op == EASY)) op = EASY;
             if (nk_option_label(ctx, "hard", op == HARD)) op = HARD;
-            nk_layout_row_dynamic(ctx, 25, 1);
+            nk_layout_row_dynamic(ctx, HiDPI(25), 1);
             nk_property_int(ctx, "Compression:", 0, &property, 100, 10, 1);
+			if (nk_color_pick(ctx, &mycolor, NK_RGBA)) {
+				printf("color %.3f %.3f %.3f %.3f\n",
+					mycolor.r,mycolor.g,mycolor.b,mycolor.a);
+			}
         }
         nk_end(ctx);
         if (nk_window_is_hidden(ctx, "Demo")) break;
 
         /* Draw */
         XClearWindow(xw.dpy, xw.win);
-        nk_xlib_render(xw.win, nk_rgb(30,30,30));
+        nk_xlib_render(xw.win, nk_rgb(255,255,255));
         XFlush(xw.dpy);
 
         /* Timing */

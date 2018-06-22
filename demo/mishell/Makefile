@@ -7,8 +7,8 @@ CFLAGS += -Wno-unused-function -Wno-unused-but-set-variable
 
 LDFLAGS += -lX11 -lm
 
-CFLAGS += ${shell pkg-config --cflags xft}
-LDFLAGS += ${shell pkg-config --libs xft}
+CFLAGS += ${shell pkg-config --cflags xft xrandr}
+LDFLAGS += ${shell pkg-config --libs xft xrandr}
 
 SRC = ${wildcard *.c}
 OBJ = $(SRC:.c=.o)
